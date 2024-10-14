@@ -1,69 +1,67 @@
-const express = require('express');
-const fetch = require('node-fetch');
-const PQueue = require('p-queue');
+import fetch from 'node-fetch';
+import cors from 'cors'; // Import the cors package
+import express from 'express'; // Don't forget to import express
 const app = express();
+const port = 3000;
 
-// Use the PORT environment variable provided by Render
-const PORT = process.env.PORT || 3000;
+app.use(cors()); // Use the cors middleware
 
-// Create a queue with a concurrency of 1 and an interval of 2 seconds
-const queue = new PQueue({
-  concurrency: 1, // Only one request at a time
-  interval: 2000, // 2-second interval between requests
-  intervalCap: 1  // Ensure only 1 request is allowed per interval
-});
+// Queue to store incoming requests
+const requestQueue = [];
+let isProcessing = false;
 
-// Middleware to parse JSON bodies
-app.use(express.json());
+// Helper function to introduce a delay (e.g., for retry logic)
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Example route to fetch data from the Roblox API using the queue system
-app.get('/fetch-data', async (req, res) => {
-  try {
-    // Add the request to the queue
-    await queue.add(async () => {
-      console.log('Fetching data from Roblox API...');
+// Function to process the queue at a fixed rate
+const processQueue = async () => {
+  if (requestQueue.length === 0 || isProcessing) return;
 
-      const response = await fetch('https://games.roblox.com/v1/games/13822889/servers/Public?sortOrder=Asc&limit=100');
+  isProcessing = true;
+  const { req, res } = requestQueue.shift(); // Get the first request in the queue
+  const apiUrl = 'https://games.roblox.com/v1/games/13822889/servers/Public?sortOrder=Asc&limit=100';
 
-      // Check if rate limited or any other error occurred
-      if (response.status === 429) {
-        const retryAfter = response.headers.get('Retry-After') || 5; // Retry after header or default to 5 seconds
-        console.log(`Rate limited. Retrying after ${retryAfter} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-        throw new Error('Rate limited. Try again later.');
-      }
-
+  let success = false; // Track if the request was successful
+  while (!success) {
+    try {
+      const response = await fetch(apiUrl);
       if (!response.ok) {
+        if (response.status === 429) {
+          // If we hit a rate limit (HTTP 429), wait before retrying
+          console.log("Rate limit hit, waiting to retry...");
+          await delay(5000); // Wait 5 seconds
+          continue; // Retry the request
+        }
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
-
       const data = await response.json();
       res.json(data);
-    });
-  } catch (error) {
-    console.error('Error fetching data:', error);
-    res.status(500).json({ error: error.message });
+      success = true; // Mark as success if we get data
+    } catch (error) {
+      console.error("Error fetching data:", error.message);
+      if (error.message.includes('timeout')) {
+        // Wait for a few seconds before retrying in case of timeout
+        console.log("Timeout occurred, waiting to retry...");
+        await delay(5000); // Wait 5 seconds
+      } else {
+        // If it's a different error, return error response and stop retrying
+        res.status(500).json({ error: error.message });
+        success = true; // Mark as success to stop the loop (even though it's failed)
+      }
+    }
   }
+
+  isProcessing = false;
+};
+
+// Schedule queue processing every X milliseconds (e.g., 1000ms = 1 second)
+setInterval(processQueue, 1000);
+
+app.get('/proxy', (req, res) => {
+  // Add request to the queue
+  requestQueue.push({ req, res });
 });
 
-// Example route to receive data from a third-party app
-app.post('/api/send-data', (req, res) => {
-  const { name, score } = req.body;
-
-  if (!name || !score) {
-    return res.status(400).json({ error: 'Name and score are required' });
-  }
-
-  console.log(`Received data: Name - ${name}, Score - ${score}`);
-  res.json({ message: 'Data received successfully', name, score });
-});
-
-// Example home route
-app.get('/', (req, res) => {
-  res.send('Hello World! Your app is running on Render.');
-});
-
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`Proxy server running on http://localhost:${port}`);
 });
