@@ -21,14 +21,17 @@ const processQueue = async () => {
   const { req, res } = requestQueue.shift(); // Get the first request in the queue
   const apiUrl = 'https://games.roblox.com/v1/games/13822889/servers/Public?sortOrder=Asc&limit=100';
 
+  console.log(`Processing request, queue size: ${requestQueue.length}`); // Print queue size after someone leaves
+
   let success = false; // Track if the request was successful
   while (!success) {
     try {
       const response = await fetch(apiUrl);
       if (!response.ok) {
         if (response.status === 429) {
-          // If we hit a rate limit (HTTP 429), wait before retrying
-          console.log("Rate limit hit, waiting to retry...");
+          // If we hit a rate limit (HTTP 429), log queue size and wait before retrying
+          console.log("Rate limit hit! Waiting to retry...");
+          console.log(`Queue size: ${requestQueue.length}`); // Print queue size when rate limit is hit
           await delay(5000); // Wait 5 seconds
           continue; // Retry the request
         }
@@ -60,6 +63,7 @@ setInterval(processQueue, 1000);
 app.get('/proxy', (req, res) => {
   // Add request to the queue
   requestQueue.push({ req, res });
+  console.log(`New request added, queue size: ${requestQueue.length}`); // Print queue size when a new request is added
 });
 
 app.listen(port, () => {
