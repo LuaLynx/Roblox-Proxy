@@ -6,7 +6,7 @@ const port = 3000;
 
 app.use(cors()); // Use the cors middleware
 
-// Queue to store incoming requests
+// Queue to store incoming requests and usernames
 const requestQueue = [];
 let isProcessing = false;
 
@@ -18,10 +18,10 @@ const processQueue = async () => {
   if (requestQueue.length === 0 || isProcessing) return;
 
   isProcessing = true;
-  const { req, res } = requestQueue.shift(); // Get the first request in the queue
+  const { req, res, username } = requestQueue.shift(); // Get the first request in the queue
   const apiUrl = 'https://games.roblox.com/v1/games/13822889/servers/Public?sortOrder=Asc&limit=100';
 
-  console.log(`Processing request, queue size: ${requestQueue.length}`); // Print queue size after someone leaves
+  console.log(`Processing request for ${username}, queue size: ${requestQueue.length}`); // Print queue size and username
 
   let success = false; // Track if the request was successful
   while (!success) {
@@ -31,7 +31,7 @@ const processQueue = async () => {
         if (response.status === 429) {
           // If we hit a rate limit (HTTP 429), log queue size and wait before retrying
           console.log("Rate limit hit! Waiting to retry...");
-          console.log(`Queue size: ${requestQueue.length}`); // Print queue size when rate limit is hit
+          console.log(`Queue size: ${requestQueue.length}, Users: ${requestQueue.map(item => item.username)}`); // Print queue size and list of usernames
           await delay(5000); // Wait 5 seconds
           continue; // Retry the request
         }
@@ -61,9 +61,12 @@ const processQueue = async () => {
 setInterval(processQueue, 1000);
 
 app.get('/proxy', (req, res) => {
-  // Add request to the queue
-  requestQueue.push({ req, res });
-  console.log(`New request added, queue size: ${requestQueue.length}`); // Print queue size when a new request is added
+  // Capture username from query parameters
+  const username = req.query.username || "Anonymous"; // Default to "Anonymous" if no username is provided
+
+  // Add request and associated username to the queue
+  requestQueue.push({ req, res, username });
+  console.log(`New request added by ${username}, queue size: ${requestQueue.length}, Users: ${requestQueue.map(item => item.username)}`); // Print queue size and usernames when a new request is added
 });
 
 app.listen(port, () => {
